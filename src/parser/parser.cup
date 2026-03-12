@@ -1,0 +1,67 @@
+package parser;
+
+import ast.*;
+import java_cup.runtime.*;
+import java.util.Hashtable;
+
+class Parser;
+
+action code {:
+    Hashtable table = new Hashtable();
+:};
+
+parser code {:
+    public void syntax_error(Symbol s){
+        System.out.println("Error en la linea "+ (s.left+1)+ " Columna "+ s.right+ ". Valor simbolo '"
+        +s.value+"' . Simbolo n° "+s.sym+ " no reconocido." );
+    }
+
+    public void unrecovered_syntax_error(Symbol s) throws java.lang.Exception{
+        System.out.println("Error en la linea "+ (s.left+1)+ " Columna "+ s.right+ ". Valor simbolo '"
+        +s.value+"' . Simbolo n° "+s.sym+ " no reconocido." );
+    }
+:};
+
+
+terminal MAS, MENOS, ASTERISCO, BARRA, PARENTESIS_ABRE, PARENTESIS_CIERRA, SHOW;
+terminal Integer CONSTANTE_ENTERA;
+
+nonterminal Expresion expresion, termino, factor;
+nonterminal Impresion impresion;
+
+start with impresion;
+
+impresion ::= SHOW expresion:e {:
+                    RESULT = new Impresion(e);
+                :};
+
+expresion ::= expresion:a MAS termino:b {:
+                  RESULT = new Suma(a, b);
+              :}
+            | expresion:a MENOS termino:b {:
+                  RESULT = new Resta(a, b);
+              :}
+            | termino:a {:
+                  RESULT = a;
+              :}
+            ;
+
+termino ::= termino:a ASTERISCO factor:b {:
+                RESULT = new Multiplicacion(a, b);
+            :}
+          | termino:a BARRA factor:b {:
+                RESULT = new Division(a, b);
+            :}
+          | factor:a {: 
+                RESULT = a;
+            :}
+          ;
+
+factor ::= CONSTANTE_ENTERA:valor {:
+              RESULT = new Constante(valor);
+          :}
+        | PARENTESIS_ABRE expresion:expr PARENTESIS_CIERRA {:
+              RESULT = expr;
+          :}
+        ;
+
