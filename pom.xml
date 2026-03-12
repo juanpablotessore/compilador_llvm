@@ -10,8 +10,8 @@
     <version>1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
-    <name>Compilador - Analizador Léxico + Sintáctico + Generador AST</name>
-    <description>Analizador léxico y sintáctico más generación de AST de ejemplo con JFlex y java-cup - UNNOBA 2026</description>
+    <name>Compilador - Analizador Léxico + Sintáctico + Generador AST + Código LLVM IR</name>
+    <description>Analizador léxico y sintáctico con generación de AST y código intermedio LLVM IR, construido con JFlex y java-cup - UNNOBA 2026</description>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -71,6 +71,15 @@
                             <mainClass>Main</mainClass>
                         </manifest>
                     </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <!-- Clase principal por defecto al usar mvn exec:java -->
+                    <mainClass>Main</mainClass>
                 </configuration>
             </plugin>
         </plugins>

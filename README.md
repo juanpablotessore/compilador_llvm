@@ -1,33 +1,38 @@
-# Compilador - Analizador Léxico + Sintáctico + AST (UNNOBA 2026)
+# Compilador - Analizador Léxico + Sintáctico + AST + Generación de Código LLVM IR (UNNOBA 2026)
 
-Analizador léxico y sintáctico de ejemplo construido con **JFlex** y **java-cup**, con generación de un Árbol de Sintaxis Abstracta (AST) y exportación a imagen mediante Graphviz.
+Analizador léxico y sintáctico construido con **JFlex** y **java-cup**, con generación de un Árbol de Sintaxis Abstracta (AST), exportación a imagen mediante Graphviz, y generación de código intermedio en formato **LLVM IR** compilable con Clang.
 
 ## Estructura del proyecto
 
 ```
-compilador_ast/
+compilador_llvm/
 ├── pom.xml
 ├── arbol.dot                       ← Archivo DOT generado (salida)
 ├── arbol.png                       ← Imagen del AST generada (salida)
+├── programa.ll                     ← Código LLVM IR generado (salida)
+├── programa.o                      ← Archivo objeto generado por Clang (salida)
+├── programa.exe                    ← Ejecutable generado por Clang (salida)
 └── src/
     ├── Generador.java              ← Regenera Lexer.java + Parser.java desde las fuentes
-    ├── Main.java                   ← Punto de entrada principal: genera el AST y lo exporta
-    ├── input_1.txt                 ← Archivo de prueba (contiene: SHOW(5+28*3))
+    ├── Main.java                   ← Punto de entrada principal: genera AST, exporta DOT/PNG y compila LLVM IR
+    ├── input_1.txt                 ← Archivo de prueba (contiene: SHOW (15+3)*20/3-21)
     ├── ast/
     │   ├── Nodo.java               ← Clase base abstracta para todos los nodos del AST
-    │   ├── Expresion.java          ← Clase abstracta para expresiones
+    │   ├── Expresion.java          ← Clase abstracta para expresiones (incluye ir_ref para LLVM)
     │   ├── OperacionBinaria.java   ← Clase abstracta para operaciones de dos operandos
-    │   ├── Impresion.java          ← Nodo raíz: representa la sentencia SHOW
+    │   ├── Impresion.java          ← Nodo raíz: representa la sentencia SHOW; genera el encabezado LLVM
     │   ├── Constante.java          ← Nodo hoja: constante entera
-    │   ├── Suma.java               ← Nodo para el operador +
-    │   ├── Resta.java              ← Nodo para el operador -
-    │   ├── Multiplicacion.java     ← Nodo para el operador *
-    │   └── Division.java           ← Nodo para el operador /
+    │   ├── Suma.java               ← Nodo para el operador +  (opcode: add)
+    │   ├── Resta.java              ← Nodo para el operador -  (opcode: sub)
+    │   ├── Multiplicacion.java     ← Nodo para el operador *  (opcode: mul)
+    │   └── Division.java           ← Nodo para el operador /  (opcode: sdiv)
     ├── lexer/
     │   ├── lexico.flex             ← Definición del léxico (fuente JFlex)
     │   ├── Lexer.java              ← Léxico generado por JFlex  ⟩ generados,
     │   ├── Token.java              ← Clase token                ⟩ se pueden
     │   └── Main_lexer.java         ← Punto de entrada: solo análisis léxico
+    ├── llvm/
+    │   └── CodeGeneratorHelper.java ← Utilidad para generar nombres únicos de registros LLVM (%ptro.N, @gb.N, tag.N)
     └── parser/
         ├── parser.cup              ← Definición de la gramática (fuente java-cup)
         ├── ParserSym.java          ← Constantes de terminales   ⟩ regenerar
@@ -44,6 +49,7 @@ compilador_ast/
 - Java 21 o superior
 - Maven 3.6 o superior
 - Graphviz (comando `dot`) para generar la imagen del AST
+- Clang (comando `clang`) para compilar el código LLVM IR a ejecutable nativo
 
 ## Primer uso: regenerar el léxico y el parser
 
@@ -61,15 +67,18 @@ Esto produce `Lexer.java`, `Parser.java` y `ParserSym.java`.
 mvn clean compile
 ```
 
-## Ejecutar el programa principal (AST)
+## Ejecutar el programa principal (AST + LLVM IR)
 
 ```bash
 mvn exec:java -Dexec.mainClass="Main"
 ```
 
 Lee `./src/input_1.txt`, construye el AST, escribe `arbol.dot` y genera `arbol.png`
-invocando Graphviz. Si Graphviz no está instalado, el archivo `.dot` igual se produce
-y puede visualizarse con cualquier herramienta compatible.
+invocando Graphviz. Luego genera `programa.ll` (código LLVM IR), lo compila con Clang
+a `programa.o` y finalmente enlaza el ejecutable `programa.exe`.
+
+Si Graphviz o Clang no están instalados, los archivos intermedios (`.dot`, `.ll`) se
+producen igualmente y pueden procesarse con las herramientas correspondientes.
 
 ## Ejecutar el analizador léxico
 
@@ -103,22 +112,58 @@ sobre la secuencia de tokens, imprimiendo los errores si los hubiera.
 
 El paquete `ast` implementa el AST mediante una jerarquía de clases:
 
-- `Nodo` — clase base. Provee `getId()` (basado en `hashCode`), `getEtiqueta()` y el método `graficar(String idPadre)` que emite el fragmento DOT del nodo.
-- `Expresion` — subclase abstracta de `Nodo` para cualquier expresión evaluable.
-- `OperacionBinaria` — subclase abstracta de `Expresion` para operadores binarios. Almacena operandos `izquierda` y `derecha`, y su `graficar()` los recorre recursivamente.
-- `Impresion` — nodo raíz que representa la sentencia `SHOW`. Su método `graficar()` (sin parámetros) inicia el recorrido y envuelve el resultado en `graph G { ... }`.
+- `Nodo` — clase base. Provee `getId()` (basado en `hashCode`), `getEtiqueta()`, el método `graficar(String idPadre)` que emite el fragmento DOT del nodo, y el método abstracto `generarCodigo()`.
+- `Expresion` — subclase abstracta de `Nodo` para cualquier expresión evaluable. Almacena `ir_ref`, el nombre del registro LLVM asignado al resultado de la expresión.
+- `OperacionBinaria` — subclase abstracta de `Expresion` para operadores binarios. Almacena operandos `izquierda` y `derecha`, y su `graficar()` los recorre recursivamente. Su `generarCodigo()` emite el código de ambos operandos y luego la instrucción LLVM correspondiente.
+- `Impresion` — nodo raíz que representa la sentencia `SHOW`. Su método `graficar()` (sin parámetros) inicia el recorrido y envuelve el resultado en `graph G { ... }`. Su `generarCodigo()` produce el módulo LLVM IR completo, incluyendo encabezados, la función `@main` y la llamada a `@printf`.
 
 Los nodos hoja y de operación concretos son: `Constante`, `Suma`, `Resta`, `Multiplicacion` y `Division`.
 
-Para la entrada `SHOW(5+28*3)` el árbol generado es:
+Para la entrada `SHOW (15+3)*20/3-21` el árbol generado es:
 
 ```
 Impresion
-└── + (Suma)
-    ├── Const 5
-    └── * (Multiplicacion)
-        ├── Const 28
-        └── Const 3
+└── - (Resta)
+    ├── / (Division)
+    │   ├── * (Multiplicacion)
+    │   │   ├── + (Suma)
+    │   │   │   ├── Const 15
+    │   │   │   └── Const 3
+    │   │   └── Const 20
+    │   └── Const 3
+    └── Const 21
+```
+
+## Generación de código LLVM IR
+
+Cada nodo del AST implementa `generarCodigo()`, que emite instrucciones LLVM IR en orden postorden. El paquete `llvm` provee la clase utilitaria `CodeGeneratorHelper`, que mantiene un contador global para asignar nombres únicos a los registros virtuales.
+
+| Método                        | Resultado          | Ejemplo                     |
+|-------------------------------|--------------------|-----------------------------|
+| `getNewPointer()`             | `%ptro.N`          | `%ptro.1`, `%ptro.2`, …     |
+| `getNewGlobalPointer()`       | `@gb.N`            | `@gb.1`, …                  |
+| `getNewTag()`                 | `tag.N`            | `tag.1`, …                  |
+
+El módulo LLVM IR generado para `SHOW (15+3)*20/3-21` es equivalente a la secuencia:
+
+```llvm
+%ptro.1 = add  i32 0, 15
+%ptro.2 = add  i32 0, 3
+%ptro.3 = add  i32 %ptro.1, %ptro.2   ; 15+3 = 18
+%ptro.4 = add  i32 0, 20
+%ptro.5 = mul  i32 %ptro.3, %ptro.4   ; 18*20 = 360
+%ptro.6 = add  i32 0, 3
+%ptro.7 = sdiv i32 %ptro.5, %ptro.6   ; 360/3 = 120
+%ptro.8 = add  i32 0, 21
+%ptro.9 = sub  i32 %ptro.7, %ptro.8   ; 120-21 = 99
+; llamada a printf con el resultado final
+```
+
+El archivo `programa.ll` completo se escribe en el directorio raíz del proyecto y luego se compila con:
+
+```bash
+clang -c -o programa.o programa.ll
+clang -o programa.exe programa.o
 ```
 
 ## Diseño del léxico (`lexico.flex`)
